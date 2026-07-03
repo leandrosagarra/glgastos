@@ -87,12 +87,36 @@ export const CATEGORIES: Category[] = [
     color: 'text-violet-600 bg-violet-50 dark:bg-violet-950/20 dark:text-violet-400 border-violet-100 dark:border-violet-900/30'
   },
   {
-    id: 'celular',
-    name: 'Celular',
+    id: 'celulares',
+    name: 'Celulares',
     type: 'expense',
     expenseType: 'fixed',
     icon: 'Smartphone',
     color: 'text-fuchsia-600 bg-fuchsia-50 dark:bg-fuchsia-950/20 dark:text-fuchsia-400 border-fuchsia-100 dark:border-fuchsia-900/30'
+  },
+  {
+    id: 'luz',
+    name: 'Luz',
+    type: 'expense',
+    expenseType: 'fixed',
+    icon: 'Lightbulb',
+    color: 'text-yellow-500 bg-yellow-50 dark:bg-yellow-950/20 dark:text-yellow-400 border-yellow-100 dark:border-yellow-900/30'
+  },
+  {
+    id: 'gas',
+    name: 'Gas',
+    type: 'expense',
+    expenseType: 'fixed',
+    icon: 'Flame',
+    color: 'text-orange-500 bg-orange-50 dark:bg-orange-950/20 dark:text-orange-400 border-orange-100 dark:border-orange-900/30'
+  },
+  {
+    id: 'udec',
+    name: 'UDEC',
+    type: 'expense',
+    expenseType: 'fixed',
+    icon: 'Heart',
+    color: 'text-rose-500 bg-rose-50 dark:bg-rose-950/20 dark:text-rose-400 border-rose-100 dark:border-rose-900/30'
   },
   {
     id: 'seguros',

@@ -25,7 +25,7 @@ import {
 export default function App() {
   // 1. Core State: Load from localStorage or start empty by default
   const [transactions, setTransactions] = useState<Transaction[]>(() => {
-    const saved = localStorage.getItem('family_finance_txs');
+    const saved = localStorage.getItem('family_finance_v2');
     if (saved) {
       try {
         return JSON.parse(saved);
@@ -57,7 +57,7 @@ export default function App() {
 
   // Sync state changes with localStorage
   useEffect(() => {
-    localStorage.setItem('family_finance_txs', JSON.stringify(transactions));
+    localStorage.setItem('family_finance_v2', JSON.stringify(transactions));
   }, [transactions]);
 
   // 3. Transactions Actions
