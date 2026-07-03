@@ -1,0 +1,6 @@
+{
+  "name": "Gestor de Gastos Inteligente",
+  "description": "Gestor de gastos corrientes personales y familiares con lógica de doble entrada, gráficos interactivos, carga por lenguaje natural y análisis financiero impulsado por IA.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
