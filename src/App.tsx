@@ -6,6 +6,9 @@ import FinancialSummary from './components/FinancialSummary';
 import ChartsPanel from './components/ChartsPanel';
 import TransactionList from './components/TransactionList';
 import AiChatbot from './components/AiChatbot';
+import SessionSyncCard from './components/SessionSyncCard';
+import { db } from './firebase';
+import { collection, query, where, onSnapshot, doc, setDoc, deleteDoc, writeBatch, getDocs } from 'firebase/firestore';
 import { 
   Sparkles, 
   RotateCcw, 
@@ -22,21 +25,73 @@ import {
   Trash2
 } from 'lucide-react';
 
+function generateSessionId() {
+  const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+  let code = '';
+  for (let i = 0; i < 6; i++) {
+    code += chars.charAt(Math.floor(Math.random() * chars.length));
+  }
+  return `FAMILIA-${code}`;
+}
+
 export default function App() {
-  // 1. Core State: Load from localStorage or start empty by default
-  const [transactions, setTransactions] = useState<Transaction[]>(() => {
-    const saved = localStorage.getItem('family_finance_v2');
-    if (saved) {
-      try {
-        return JSON.parse(saved);
-      } catch (e) {
-        console.error('Error parsing stored transactions:', e);
-      }
-    }
-    return [];
+  // 1. Session State: Load from localStorage or create a random code
+  const [sessionId, setSessionId] = useState<string>(() => {
+    const saved = localStorage.getItem('family_finance_session_id');
+    if (saved) return saved.trim().toUpperCase();
+    const newId = generateSessionId();
+    localStorage.setItem('family_finance_session_id', newId);
+    return newId;
   });
 
-  // 2. Dark/Light Theme Sync State
+  // 2. Transactions State & Syncing Indicators
+  const [transactions, setTransactions] = useState<Transaction[]>([]);
+  const [isSyncing, setIsSyncing] = useState<boolean>(true);
+
+  // Sync session changes with localStorage
+  const handleSessionIdChange = (newId: string) => {
+    const sanitized = newId.trim().toUpperCase();
+    setSessionId(sanitized);
+    localStorage.setItem('family_finance_session_id', sanitized);
+  };
+
+  // Real-time Firestore sync based on sessionId
+  useEffect(() => {
+    setIsSyncing(true);
+    const q = query(
+      collection(db, 'transactions'),
+      where('sessionId', '==', sessionId)
+    );
+
+    const unsubscribe = onSnapshot(q, (snapshot) => {
+      const list: Transaction[] = [];
+      snapshot.forEach((docSnap) => {
+        const data = docSnap.data();
+        list.push({
+          id: docSnap.id,
+          type: data.type,
+          expenseType: data.expenseType,
+          category: data.category,
+          amount: data.amount,
+          description: data.description,
+          date: data.date,
+        });
+      });
+
+      // Sort client-side by date desc (this keeps sorting robust without requiring custom Firestore indexes)
+      list.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+
+      setTransactions(list);
+      setIsSyncing(false);
+    }, (error) => {
+      console.error('Firestore real-time sync failed:', error);
+      setIsSyncing(false);
+    });
+
+    return () => unsubscribe();
+  }, [sessionId]);
+
+  // 3. Dark/Light Theme Sync State
   const [isDark, setIsDark] = useState<boolean>(() => {
     const savedTheme = localStorage.getItem('theme');
     if (savedTheme) {
@@ -55,35 +110,97 @@ export default function App() {
     }
   }, [isDark]);
 
-  // Sync state changes with localStorage
-  useEffect(() => {
-    localStorage.setItem('family_finance_v2', JSON.stringify(transactions));
-  }, [transactions]);
+  // 3. Transactions Cloud Actions
+  const handleAddTransaction = async (newTx: Omit<Transaction, 'id'>) => {
+    const txId = `tx-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+    setIsSyncing(true);
+    try {
+      // Clean undefined values so Firestore does not throw an error
+      const cleanTx: any = {
+        type: newTx.type,
+        category: newTx.category,
+        amount: newTx.amount,
+        description: newTx.description,
+        date: newTx.date,
+        sessionId: sessionId,
+        createdAt: new Date().toISOString()
+      };
+      if (newTx.type === 'expense') {
+        cleanTx.expenseType = newTx.expenseType || 'variable';
+      }
 
-  // 3. Transactions Actions
-  const handleAddTransaction = (newTx: Omit<Transaction, 'id'>) => {
-    const transactionWithId: Transaction = {
-      ...newTx,
-      id: `tx-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
-    };
-    setTransactions((prev) => [transactionWithId, ...prev]);
+      await setDoc(doc(db, 'transactions', txId), cleanTx);
+    } catch (error) {
+      console.error('Error writing transaction to cloud:', error);
+      alert('Error de conexión al cargar el movimiento.');
+    } finally {
+      setIsSyncing(false);
+    }
   };
 
-  const handleDeleteTransaction = (id: string) => {
+  const handleDeleteTransaction = async (id: string) => {
     if (confirm('¿Estás seguro de que querés eliminar este movimiento?')) {
-      setTransactions((prev) => prev.filter((t) => t.id !== id));
+      setIsSyncing(true);
+      try {
+        await deleteDoc(doc(db, 'transactions', id));
+      } catch (error) {
+        console.error('Error deleting transaction from cloud:', error);
+        alert('Error de conexión al eliminar el movimiento.');
+      } finally {
+        setIsSyncing(false);
+      }
     }
   };
 
-  const handleResetToMockData = () => {
-    if (confirm('Se restablecerán los datos a la simulación inicial (Junio y Julio 2026). ¿Continuar?')) {
-      setTransactions(INITIAL_TRANSACTIONS);
+  const handleResetToMockData = async () => {
+    if (confirm('Se restablecerán los datos de tu sesión a la simulación inicial (Junio y Julio 2026). ¿Continuar?')) {
+      setIsSyncing(true);
+      try {
+        // Sequentially write mock data under current session
+        for (const tx of INITIAL_TRANSACTIONS) {
+          const txId = `tx-mock-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+          const cleanMockTx: any = {
+            type: tx.type,
+            category: tx.category,
+            amount: tx.amount,
+            description: tx.description,
+            date: tx.date,
+            sessionId: sessionId,
+            createdAt: new Date().toISOString()
+          };
+          if (tx.type === 'expense') {
+            cleanMockTx.expenseType = tx.expenseType || 'variable';
+          }
+
+          await setDoc(doc(db, 'transactions', txId), cleanMockTx);
+        }
+      } catch (error) {
+        console.error('Error seeding mock data to cloud:', error);
+        alert('Error de conexión al restablecer datos.');
+      } finally {
+        setIsSyncing(false);
+      }
     }
   };
 
-  const handleClearAllTransactions = () => {
-    if (confirm('¿Estás seguro de que querés borrar TODOS los movimientos de la lista? Esta acción vaciará el gestor.')) {
-      setTransactions([]);
+  const handleClearAllTransactions = async () => {
+    if (confirm('¿Estás seguro de que querés borrar TODOS los movimientos de esta sesión en la nube? Esta acción vaciará el gestor.')) {
+      setIsSyncing(true);
+      try {
+        // Query current documents in session to delete them
+        const q = query(collection(db, 'transactions'), where('sessionId', '==', sessionId));
+        const snapshots = await getDocs(q);
+        const batch = writeBatch(db);
+        snapshots.forEach((docSnap) => {
+          batch.delete(docSnap.ref);
+        });
+        await batch.commit();
+      } catch (error) {
+        console.error('Error clearing cloud session transactions:', error);
+        alert('Error de conexión al vaciar el gestor.');
+      } finally {
+        setIsSyncing(false);
+      }
     }
   };
 
@@ -103,15 +220,27 @@ export default function App() {
     const files = e.target.files;
     if (files && files.length > 0) {
       fileReader.readAsText(files[0], "UTF-8");
-      fileReader.onload = (event) => {
+      fileReader.onload = async (event) => {
         try {
           const parsed = JSON.parse(event.target?.result as string);
           if (Array.isArray(parsed)) {
-            // Simple validation that at least some core fields exist
-            const isValid = parsed.every(item => item.id && item.type && item.category && item.amount);
+            const isValid = parsed.every(item => item.type && item.category && item.amount);
             if (isValid) {
-              setTransactions(parsed);
-              alert('¡Copia de seguridad importada con éxito!');
+              setIsSyncing(true);
+              for (const item of parsed) {
+                const txId = item.id || `tx-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+                await setDoc(doc(db, 'transactions', txId), {
+                  type: item.type,
+                  expenseType: item.expenseType || 'variable',
+                  category: item.category,
+                  amount: item.amount,
+                  description: item.description || '',
+                  date: item.date || new Date().toISOString().split('T')[0],
+                  sessionId: sessionId,
+                  createdAt: new Date().toISOString()
+                });
+              }
+              alert('¡Copia de seguridad importada y guardada con éxito en la nube!');
             } else {
               alert('El archivo no tiene el formato correcto de movimientos.');
             }
@@ -119,7 +248,10 @@ export default function App() {
             alert('Formato de datos inválido.');
           }
         } catch (error) {
-          alert('No se pudo leer el archivo de copia de seguridad.');
+          console.error('Error importing backup:', error);
+          alert('No se pudo guardar el archivo de copia de seguridad en la nube.');
+        } finally {
+          setIsSyncing(false);
         }
       };
     }
@@ -138,6 +270,18 @@ export default function App() {
     .filter((t) => t.type === 'income')
     .reduce((sum, t) => sum + t.amount, 0);
   const julyBalance = totalJulyIncome - totalJulyExpense;
+
+  // Format today's date dynamically in Spanish
+  const getFormattedToday = () => {
+    try {
+      const today = new Date();
+      const options: Intl.DateTimeFormatOptions = { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' };
+      const formatted = today.toLocaleDateString('es-AR', options);
+      return formatted.charAt(0).toUpperCase() + formatted.slice(1);
+    } catch (e) {
+      return "Domingo, 5 de julio de 2026";
+    }
+  };
 
   return (
     <div className="min-h-screen bg-slate-50 text-slate-800 dark:bg-slate-950 dark:text-slate-100 transition-colors duration-200">
@@ -241,7 +385,7 @@ export default function App() {
           </div>
           <div className="flex items-center gap-2 bg-indigo-500/20 px-3 py-2 rounded-xl border border-indigo-500/30 shrink-0 self-start sm:self-center">
             <Info className="w-3.5 h-3.5 text-indigo-200" />
-            <span className="text-[10px] font-bold text-indigo-100">Hoy es Viernes 3 de Julio, 2026</span>
+            <span className="text-[10px] font-bold text-indigo-100">Hoy es {getFormattedToday()}</span>
           </div>
         </div>
 
@@ -256,6 +400,13 @@ export default function App() {
           
           {/* LEFT WIDGETS COLUMN (8 cols of 12) */}
           <div className="lg:col-span-8 space-y-6">
+            
+            {/* Session Sychronization Management Widget */}
+            <SessionSyncCard 
+              sessionId={sessionId} 
+              onSessionIdChange={handleSessionIdChange} 
+              isSyncing={isSyncing} 
+            />
             
             {/* Input Form Box (Tabs for manual & IA parsing) */}
             <TransactionForm onAddTransaction={handleAddTransaction} />

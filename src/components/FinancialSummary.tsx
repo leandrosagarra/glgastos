@@ -40,10 +40,10 @@ export const FinancialSummary: React.FC<FinancialSummaryProps> = ({
     .reduce((sum, t) => sum + t.amount, 0);
 
   // 3. Projections
-  // Current local date in context is 2026-07-03.
-  // The current day of July is 3. Days in July = 31.
-  const currentDay = 3;
-  const daysInMonth = 31;
+  // Calculate dynamic day of the month and days in current month
+  const today = new Date();
+  const currentDay = today.getDate();
+  const daysInMonth = new Date(today.getFullYear(), today.getMonth() + 1, 0).getDate();
   
   // Projected expenses: fixed expenses are flat, variables are projected based on elapsed days.
   const projectedVariable = currentDay > 0 ? (totalVariable / currentDay) * daysInMonth : 0;
